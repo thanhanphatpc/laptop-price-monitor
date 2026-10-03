@@ -1,15 +1,14 @@
-[2026-10-02T22:22:59.407Z] --- Bắt đầu enrich-and-export.js ---
-[2026-10-02T22:22:59.415Z] Đọc được 1996 SP từ 4 file artifact (scrape-artifacts)
-[2026-10-02T22:22:59.416Z] Đọc Part # (FORMULA render)...
-[2026-10-02T22:22:59.710Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
-[2026-10-02T22:22:59.710Z] Đọc Segment (FORMULA render)...
-[2026-10-02T22:22:59.843Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
-[2026-10-02T22:22:59.843Z] Part# header index: {}
-[2026-10-02T22:22:59.844Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
-[2026-10-02T22:22:59.844Z] Part# map: 0 SKU
-[2026-10-02T22:22:59.844Z] Vendor chuan tu Part#: 0 gia tri -> []
-[2026-10-02T22:22:59.867Z] Tính xong 1996 dòng enriched (loại 0 SP EOL)
-[2026-10-02T22:23:01.226Z] data.csv cũ: 84644 dòng, giữ lại 84644 dòng (loại dòng 03/10/2026 nếu có, sẽ thêm bản mới)
-[2026-10-02T22:23:01.363Z] ✅ Không có giá bất thường (kiểm tra 1996 dòng vs trung vị 7 ngày)
-[2026-10-02T22:23:01.383Z] Cắt còn 35 ngày gần nhất (84945 dòng)
-[2026-10-02T22:23:02.191Z] ✅ Đã ghi /home/runner/work/laptopspects/laptopspects/dashboard/data.csv — 84946 dòng (kể cả header), 27298 KB
+[2026-10-03T06:45:43.441Z] --- Bắt đầu enrich-and-export.js ---
+[2026-10-03T06:45:43.450Z] Đọc được 2395 SP từ 4 file artifact (scrape-artifacts)
+[2026-10-03T06:45:43.450Z] Đọc Part # (FORMULA render)...
+[2026-10-03T06:45:43.753Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
+[2026-10-03T06:45:43.753Z] Đọc Segment (FORMULA render)...
+[2026-10-03T06:45:43.878Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
+[2026-10-03T06:45:43.878Z] Part# header index: {}
+[2026-10-03T06:45:43.878Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
+[2026-10-03T06:45:43.878Z] Part# map: 0 SKU
+[2026-10-03T06:45:43.878Z] Vendor chuan tu Part#: 0 gia tri -> []
+[2026-10-03T06:45:43.908Z] Tính xong 2395 dòng enriched (loại 0 SP EOL)
+[2026-10-03T06:45:45.203Z] data.csv cũ: 84945 dòng, giữ lại 82949 dòng (loại dòng 03/10/2026 nếu có, sẽ thêm bản mới)
+[2026-10-03T06:45:45.329Z] ✅ Không có giá bất thường (kiểm tra 2395 dòng vs trung vị 7 ngày)
+[2026-10-03T06:45:46.097Z] ✅ Đã ghi /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 85345 dòng (kể cả header), 27411 KB
