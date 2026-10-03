@@ -22,6 +22,7 @@ const os = require('os');
 const { google } = require('googleapis');
 // Chuan hoa spec cho dong KHONG khop tab Part # — them 02/09/2026.
 const { normalizeCpu } = require('./spec_normalize.js');
+const { fillRows } = require('./name_enrich.js'); // 03/10/2026 [An Phat PC]
 const { K } = require('./spec_dictionary.js');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -281,6 +282,10 @@ async function main() {
     }
     outRows.push(row);
   }
+  // 03/10/2026 [An Phat PC]: dien thong so con thieu tu ten SP + tra cheo
+  // model code + dong may (giong enrich-and-export.js — 2 file phai di cung).
+  try { fillRows(outRows, COL, debugLog); }
+  catch (e) { debugLog(`⚠ name_enrich lỗi (bỏ qua): ${e.message}`); }
   debugLog(`Re-enrich xong: ${matched}/${dataRows.length} dòng khớp Part # (loại ${skippedEOL} SP EOL), ${normalized} dòng được chuẩn hoá spec.`);
 
   const csv = [header, ...outRows].map(r => r.map(csvEscape).join(',')).join('\n') + '\n';

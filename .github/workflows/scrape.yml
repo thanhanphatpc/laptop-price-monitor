@@ -120,7 +120,7 @@ jobs:
   scrape-mbw:
     if: ${{ inputs.run_scrape || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150 # 03/10/2026: du cho toi da 3 lan chay lai
     permissions:
       contents: write
     steps:
@@ -146,7 +146,8 @@ jobs:
           SCRAPE_DEALERS: MBW
           WRITE_MODE: file
         shell: bash
-        run: npm start
+        # 03/10/2026: tu chay lai neu lay duoc < 300 ma (binh thuong ~440)
+        run: bash scrape-retry.sh MBW 300 3
 
       - name: Upload artifact
         if: always()
@@ -205,7 +206,9 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           SCRAPE_DEALERS: CPS
           WRITE_MODE: file
-        run: npm start
+        shell: bash
+        # 03/10/2026: tu chay lai neu lay duoc < 400 ma (binh thuong ~570)
+        run: bash scrape-retry.sh CPS 400 2
 
       - name: Upload artifact
         if: always()

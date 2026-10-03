@@ -34,6 +34,9 @@ const { google } = require('googleapis');
 // Chuan hoa spec cho duong lui (khi SP khong khop tab Part #) — 02/09/2026.
 const { normalizeCpu } = require('./spec_normalize.js');
 const { K } = require('./spec_dictionary.js');
+// 03/10/2026 [An Phat PC]: dien thong so tu ten SP + tra cheo model code khi
+// khong co tab "Part #" (xem name_enrich.js).
+const { fillRows } = require('./name_enrich.js');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const CREDS_PATH = path.join(os.tmpdir(), 'enrich-gcreds.json');
@@ -365,13 +368,78 @@ async function main() {
   // 6) Gộp vào data.csv hiện có, bỏ dòng cũ của HÔM NAY (tránh trùng nếu
   //    chạy lại), cắt còn tối đa MAX_HISTORY_DAYS ngày gần nhất.
   let existingRows = [];
+  let oldTodayRows = [];
   if (fs.existsSync(DATA_CSV_PATH)) {
     const raw = fs.readFileSync(DATA_CSV_PATH, 'utf8');
     const parsed = parseCsvSimple(raw);
     existingRows = parsed.slice(1).filter(r => r[0] !== dateStr);
+    oldTodayRows = parsed.slice(1).filter(r => r[0] === dateStr);
     debugLog(`data.csv cũ: ${parsed.length - 1} dòng, giữ lại ${existingRows.length} dòng (loại dòng ${dateStr} nếu có, sẽ thêm bản mới)`);
   } else {
     debugLog('Chưa có data.csv — tạo mới.');
+  }
+
+  // 6a) 03/10/2026 [An Phat PC] — CHẶN GHI ĐÈ KHI DỮ LIỆU BỊ HỤT.
+  // Sự cố 03/10: lượt 05:22 chỉ lấy được 50/440 mã MBW nhưng vẫn ghi thẳng
+  // vào dashboard. Nay so số mã hôm nay của từng dealer với TRUNG VỊ 7 ngày
+  // gần nhất: nếu dưới 70% VÀ trong data.csv đã có bản hôm nay đầy đủ hơn
+  // (từ lượt chạy trước trong ngày) thì GIỮ bản cũ cho dealer đó.
+  // Nếu chưa có bản nào tốt hơn thì vẫn ghi (dashboard tự hiện giá gần nhất
+  // cho mã thiếu) và ghi cảnh báo ra dashboard/.coverage-warning.txt.
+  {
+    const COVERAGE_MIN = 0.7;
+    const cnt = new Map(); // dealer -> Map(date -> n)
+    for (const r of existingRows) {
+      if (!cnt.has(r[2])) cnt.set(r[2], new Map());
+      const m = cnt.get(r[2]); m.set(r[0], (m.get(r[0]) || 0) + 1);
+    }
+    const recentDates = [...new Set(existingRows.map(r => r[0]))].sort((a, b) => parseDMY(b) - parseDMY(a)).slice(0, 7);
+    const newByDealer = new Map(), oldByDealer = new Map();
+    for (const r of newRows) newByDealer.set(r[2], (newByDealer.get(r[2]) || 0) + 1);
+    for (const r of oldTodayRows) oldByDealer.set(r[2], (oldByDealer.get(r[2]) || 0) + 1);
+    const warnings = [];
+    const keepOld = new Set();
+    for (const [dealer, n] of newByDealer) {
+      const hist = recentDates.map(d => (cnt.get(dealer) || new Map()).get(d) || 0).filter(x => x > 0).sort((a, b) => a - b);
+      if (hist.length < 3) continue;
+      const median = hist[Math.floor(hist.length / 2)];
+      if (n >= median * COVERAGE_MIN) continue;
+      const old = oldByDealer.get(dealer) || 0;
+      if (old > n) {
+        keepOld.add(dealer);
+        warnings.push(`[${dealer}] lượt này chỉ ${n} mã (trung vị 7 ngày ${median}) — GIỮ bản ${old} mã của lượt trước trong ngày`);
+      } else {
+        warnings.push(`[${dealer}] chỉ ${n} mã (trung vị 7 ngày ${median}, ${Math.round(n / median * 100)}%) — dữ liệu hôm nay KHÔNG đủ, mã thiếu sẽ hiện giá ngày gần nhất`);
+      }
+    }
+    // Dealer co trong lich su gan day nhung hom nay 0 ma -> giu ban cu neu co
+    for (const [dealer, old] of oldByDealer) {
+      if (!newByDealer.has(dealer) && old > 0) {
+        keepOld.add(dealer);
+        warnings.push(`[${dealer}] lượt này 0 mã — GIỮ bản ${old} mã của lượt trước trong ngày`);
+      }
+    }
+    if (keepOld.size) {
+      for (let i = newRows.length - 1; i >= 0; i--) if (keepOld.has(newRows[i][2])) newRows.splice(i, 1);
+      for (const r of oldTodayRows) if (keepOld.has(r[2])) newRows.push(r);
+    }
+    const warnPath = path.join(__dirname, 'dashboard', '.coverage-warning.txt');
+    if (warnings.length) {
+      warnings.forEach(w => debugLog('⚠ ' + w));
+      try { fs.writeFileSync(warnPath, `${dateStr} ${timeStr}\n` + warnings.join('\n') + '\n'); } catch (_) {}
+    } else {
+      debugLog('✅ Số mã từng dealer đạt ≥70% trung vị 7 ngày');
+      try { if (fs.existsSync(warnPath)) fs.unlinkSync(warnPath); } catch (_) {}
+    }
+  }
+
+  // 6a-2) Dien thong so con thieu (ten SP + tra cheo model code + dong may).
+  // Chay tren CA lich su de cac ngay cu cung duoc bo sung.
+  try {
+    const COL = { SKU: 3, SeriesGroup: 10, Segment: 11, CPUSegment: 12, CPU: 13, RAM: 14, SSD: 15, Screen: 16, GPU: 17, VRAM: 18, PartNo: 21 };
+    fillRows(existingRows.concat(newRows), COL, debugLog);
+  } catch (e) {
+    debugLog(`⚠ name_enrich lỗi (bỏ qua, giữ dữ liệu như cũ): ${e.message}`);
   }
 
   // 6b) FIX 18/08/2026 — CHẶN GIÁ BẤT THƯỜNG (lớp bảo vệ CHUNG).
