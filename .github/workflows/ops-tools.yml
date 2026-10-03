@@ -1,0 +1,670 @@
+name: Ops Tools - Chon phan can chay (khong dung production)
+
+# 1 workflow duy nhat cho cac tool test/tien ich (KHONG bao gom scrape.yml -
+# do la pipeline production dang chay on dinh hang ngay, de rieng tranh rui
+# ro). Tick chon tung phan can chay, hoac tick "Chay tat ca" de chay het.
+
+on:
+  schedule:
+    # Tu dong chay Archive RAW DATA (cua so truot 15+15 ngay) moi tuan 1 lan
+    # — Chu Nhat 02:00 UTC (~09:00 VN). Cac job khac KHONG bi anh huong boi
+    # schedule nay (chi archive-rawdata-execute moi tu kich hoat, xem dieu
+    # kien "if" cua job do).
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      run_all:
+        description: 'Chay TAT CA cac phan ben duoi'
+        type: boolean
+        default: false
+      run_fpt_test:
+        description: 'FPT_TEST — scrape FPT qua Bright Data Browser API, ghi tab FPT_TEST'
+        type: boolean
+        default: false
+      run_export_dashboard:
+        description: 'Export dashboard data — doc lai tab Dailly SRP Tracking, ghi dashboard/data.csv (dung sau khi restore/sua tab thu cong)'
+        type: boolean
+        default: false
+      run_archive_rawdata_dryrun:
+        description: 'Archive RAW DATA - XEM TRUOC (dry run, khong sua gi ca, an toan)'
+        type: boolean
+        default: false
+      run_archive_rawdata_EXECUTE:
+        description: '‼️ Archive RAW DATA - THUC THI THAT (ghi archive + rut gon RAW DATA). Chi bam sau khi da xem dry-run va thay so lieu on.'
+        type: boolean
+        default: false
+      raw_data_keep_days:
+        description: 'So ngay gan nhat giu trong RAW DATA (mac dinh 15)'
+        required: false
+        default: '15'
+      archive_keep_days:
+        description: 'So ngay tiep theo giu trong RAW DATA ARCHIVE (mac dinh 15). Cu hon tong 2 so nay se bi XOA VINH VIEN.'
+        required: false
+        default: '15'
+      run_backfill_dryrun:
+        description: 'Backfill enrichment T-AE tu Part# - XEM TRUOC (dry run)'
+        type: boolean
+        default: false
+      run_backfill_EXECUTE:
+        description: '‼️ Backfill enrichment T-AE tu Part# - THUC THI THAT (doi header + dien du lieu)'
+        type: boolean
+        default: false
+      run_check_avail:
+        description: 'CHECK: phan bo Availability sau khi fix het hang/tam het hang'
+        type: boolean
+        default: false
+      run_check_mbw:
+        description: 'CHECK: dieu tra MBW thieu data'
+        type: boolean
+        default: false
+      run_check_rawdata:
+        description: 'Check RAW DATA — kiem tra tab RAW DATA production'
+        type: boolean
+        default: false
+      run_diagnose_sheet:
+        description: 'Diagnose Sheet Formulas — chan doan cong thuc sheet'
+        type: boolean
+        default: false
+      run_freeze_formulas:
+        description: 'Freeze Heavy Formulas — dong bang cong thuc nang'
+        type: boolean
+        default: false
+      run_inspect_structure:
+        description: 'Inspect Sheet Structure — xem cau truc sheet'
+        type: boolean
+        default: false
+      run_fpt_diagnostic:
+        description: 'FPT Blocking Diagnostic — so sanh cloud vs MSI (can self-hosted online)'
+        type: boolean
+        default: false
+      fpt_url:
+        description: 'URL FPT can test (chi dung cho FPT Blocking Diagnostic)'
+        required: false
+        default: 'https://fptshop.com.vn/may-tinh-xach-tay'
+      control_url:
+        description: 'URL doi chung (chi dung cho FPT Blocking Diagnostic)'
+        required: false
+        default: 'https://www.thegioididong.com/laptop'
+      run_apc_probe:
+        description: 'APC Probe — chay apc_api.js tren IP cloud, CHI in log, KHONG ghi Sheet'
+        type: boolean
+        default: false
+      run_segment_audit:
+        description: 'Segment Audit — doi chieu tab Segment voi bo luat chuan hoa. CHI DOC, khong ghi Sheet'
+        type: boolean
+        default: false
+      apc_probe_use_proxy:
+        description: 'APC Probe: di qua Cloudflare Worker (/__proxy/apc) thay vi goi thang. Chi tick khi goi thang bi chan.'
+        type: boolean
+        default: false
+
+jobs:
+  fpt-test:
+    name: FPT_TEST (Bright Data Browser API)
+    if: ${{ inputs.run_all || inputs.run_fpt_test }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install
+      - name: Chay scrape + ghi tab FPT_TEST
+        env:
+          BRIGHTDATA_BROWSER_WS: ${{ secrets.BRIGHTDATA_BROWSER_WS }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node fpt_test_integration.js
+      - name: Bao cao Telegram (best-effort)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          CHAT: ${{ secrets.OPS_CHAT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then exit 0; fi
+          INFO=$(cat scrape-output/fpttest_summary.json 2>/dev/null || echo '{}')
+          curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT}" --data-urlencode "text=[FPT_TEST] ${INFO}" -o /dev/null -w "telegram: %{http_code}\n" || true
+
+  export-dashboard:
+    name: Export dashboard data (Dailly SRP Tracking -> data.csv)
+    if: ${{ inputs.run_all || inputs.run_export_dashboard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node export-dashboard-data.js
+      - run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if [ -n "$(git status --porcelain dashboard/data.csv dashboard/.export-debug.log)" ]; then
+            git add dashboard/data.csv dashboard/.export-debug.log
+            git commit -m "chore: refresh dashboard data.csv (chay tay tu Ops Tools) [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          else
+            echo "Khong co thay doi"
+          fi
+
+  archive-rawdata-dryrun:
+    name: Archive RAW DATA - DRY RUN (chi xem, khong sua)
+    if: ${{ inputs.run_archive_rawdata_dryrun }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RAW_DATA_KEEP_DAYS: ${{ inputs.raw_data_keep_days }}
+          ARCHIVE_KEEP_DAYS: ${{ inputs.archive_keep_days }}
+          EXECUTE: 'false'
+        run: node archive-rawdata.js > archive-dryrun-report.txt 2>&1 || true
+      - name: Commit ket qua dry-run
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add archive-dryrun-report.txt
+          git commit -m "chore: archive rawdata dry-run report [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  archive-rawdata-execute:
+    name: '‼️ Archive RAW DATA - THUC THI THAT'
+    if: ${{ inputs.run_archive_rawdata_EXECUTE || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RAW_DATA_KEEP_DAYS: ${{ inputs.raw_data_keep_days || '15' }}
+          ARCHIVE_KEEP_DAYS: ${{ inputs.archive_keep_days || '15' }}
+          EXECUTE: 'true'
+        run: node archive-rawdata.js > archive-execute-report.txt 2>&1 || true
+      - name: Commit ket qua execute
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add archive-execute-report.txt
+          git commit -m "chore: archive rawdata execute report [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Bao cao Telegram (best-effort)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.OPS_BOT_TOKEN }}
+          CHAT: ${{ secrets.OPS_CHAT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then exit 0; fi
+          SUMMARY=$(tail -5 archive-execute-report.txt 2>/dev/null || echo "khong co report")
+          curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT}" --data-urlencode "text=[Archive RAW DATA - tu dong hang tuan] ${SUMMARY}" -o /dev/null -w "telegram: %{http_code}\n" || true
+
+  backfill-enrichment-dryrun:
+    name: 'Backfill enrichment T-AE - DRY RUN'
+    if: ${{ inputs.run_backfill_dryrun }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          EXECUTE: 'false'
+        run: node backfill-enrichment.js > backfill-dryrun-report.txt 2>&1 || true
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backfill-dryrun-report.txt
+          git commit -m "chore: backfill enrichment dry-run report [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  backfill-enrichment-execute:
+    name: '‼️ Backfill enrichment T-AE - THUC THI THAT'
+    if: ${{ inputs.run_backfill_EXECUTE }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          EXECUTE: 'true'
+        run: node backfill-enrichment.js > backfill-execute-report.txt 2>&1 || true
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backfill-execute-report.txt
+          git commit -m "chore: backfill enrichment execute report [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  check-mbw-issue:
+    name: 'CHECK: MBW thieu data hom nay'
+    if: ${{ inputs.run_check_mbw }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node check-mbw-issue.js > check-mbw-log.txt 2>&1 || true
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add check-mbw-log.txt
+          git commit -m "chore: check mbw issue [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  check-availability:
+    name: 'CHECK: phan bo Availability sau fix'
+    if: ${{ inputs.run_check_avail }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node check-availability-dist.js > check-avail-log.txt 2>&1 || true
+      - name: Commit
+        if: always()
+        run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add check-avail-log.txt
+          git commit -m "chore: check availability distribution [skip ci]" || echo "nothing"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  check-rawdata:
+    name: Check RAW DATA
+    if: ${{ inputs.run_all || inputs.run_check_rawdata }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node check-rawdata.js
+      - run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if [ -f rawdata-check-report.txt ] && [ -n "$(git status --porcelain rawdata-check-report.txt)" ]; then
+            git add rawdata-check-report.txt
+            git commit -m "chore: rawdata check report [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+  diagnose-sheet:
+    name: Diagnose Sheet Formulas
+    if: ${{ inputs.run_all || inputs.run_diagnose_sheet }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node diagnose-sheet.js
+      - run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if [ -f diagnostic-report.txt ] && [ -n "$(git status --porcelain diagnostic-report.txt)" ]; then
+            git add diagnostic-report.txt
+            git commit -m "chore: diagnostic report [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+  freeze-formulas:
+    name: Freeze Heavy Formulas
+    if: ${{ inputs.run_all || inputs.run_freeze_formulas }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node freeze-formulas.js
+      - run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if [ -f freeze-report.txt ] && [ -n "$(git status --porcelain freeze-report.txt)" ]; then
+            git add freeze-report.txt
+            git commit -m "chore: freeze report [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+  inspect-structure:
+    name: Inspect Sheet Structure
+    if: ${{ inputs.run_all || inputs.run_inspect_structure }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install googleapis@140 --no-save --no-audit --no-fund
+      - env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node inspect-structure.js
+      - run: |
+          git config user.name "msi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if [ -f structure-report.txt ] && [ -n "$(git status --porcelain structure-report.txt)" ]; then
+            git add structure-report.txt
+            git commit -m "chore: structure report [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+  fpt-diagnostic-cloud:
+    name: FPT Blocking Diagnostic - cloud (IP datacenter)
+    if: ${{ inputs.run_all || inputs.run_fpt_diagnostic }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: |
+          npm install puppeteer --no-save
+          npx puppeteer browsers install chrome
+      - continue-on-error: true
+        env:
+          FPT_URL: ${{ inputs.fpt_url }}
+          CONTROL_URL: ${{ inputs.control_url }}
+        run: node test_fpt_diagnostic.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpt-diagnostic-cloud
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+  fpt-diagnostic-selfhosted:
+    name: FPT Blocking Diagnostic - MSI (IP dan cu)
+    if: ${{ inputs.run_all || inputs.run_fpt_diagnostic }}
+    runs-on: [self-hosted, msi]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: |
+          npm install puppeteer --no-save
+          npx puppeteer browsers install chrome
+      - continue-on-error: true
+        env:
+          FPT_URL: ${{ inputs.fpt_url }}
+          CONTROL_URL: ${{ inputs.control_url }}
+        run: node test_fpt_diagnostic.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpt-diagnostic-msi
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # APC Probe — 02/09/2026.
+  # Chay apc_api.js tren runner cloud de tra loi DUY NHAT 1 cau hoi:
+  # An Phat co chan IP datacenter cua GitHub khong?
+  #
+  # An toan tuyet doi voi production: KHONG co GOOGLE_CREDENTIALS/SPREADSHEET_ID
+  # trong env, va apc_api.js von chi ghi file JSON local — khong co duong nao
+  # cham vao Google Sheet. Chay bao nhieu lan cung duoc.
+  #
+  # DOC KET QUA:
+  #   products=937 (~99% total)  -> khong bi chan, giu nguyen cau hinh goi thang
+  #   EMPTY_BODY / status 403    -> bi chan HOAC thieu header. Tick lai voi
+  #                                 apc_probe_use_proxy=true de doi chieu:
+  #                                 qua proxy chay duoc = bi chan IP -> bo
+  #                                 comment MBW_PROXY_HOST trong scrape.yml.
+  #                                 Ca hai deu hong = site doi API, phai sua code.
+  apc-probe:
+    name: APC Probe (IP cloud, khong ghi Sheet)
+    if: ${{ inputs.run_all || inputs.run_apc_probe }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install
+
+      - name: Chay apc_api.js
+        continue-on-error: true
+        env:
+          OUTPUT_DIR: apc-probe-output
+          # Rong = goi thang anphatpc.com.vn. Co gia tri = di qua Worker.
+          MBW_PROXY_HOST: ${{ inputs.apc_probe_use_proxy && secrets.MBW_PROXY_HOST || '' }}
+        shell: bash
+        run: |
+          mkdir -p apc-probe-output
+          if [ -n "$MBW_PROXY_HOST" ]; then
+            echo "Che do: QUA Cloudflare Worker (/__proxy/apc)"
+          else
+            echo "Che do: GOI THANG anphatpc.com.vn tu IP runner"
+          fi
+          echo "IP ra ngoai cua runner nay:"
+          curl -sS --max-time 15 https://api.ipify.org || echo "(khong lay duoc)"
+          echo ""
+          set -o pipefail
+          node apc_api.js 2>&1 | tee apc-probe-output/probe.log || true
+
+      - name: Tom tat
+        if: always()
+        shell: bash
+        run: |
+          F=apc-probe-output/products-APC.json
+          if [ -f "$F" ]; then
+            node -e '
+              const a = require("./apc-probe-output/products-APC.json");
+              const has = k => a.filter(p => p[k]).length;
+              console.log("KET QUA: " + a.length + " SP");
+              console.log("  con hang : " + a.filter(p => p.stockStatus === "Còn hàng").length);
+              for (const k of ["cpu","ram","storage","screen","gpu"]) {
+                console.log("  co " + k.padEnd(8) + ": " + has(k) + "/" + a.length);
+              }
+              const msi = a.filter(p => p.brand === "MSI").length;
+              console.log("  MSI      : " + msi + " SKU");
+              if (a.length < 850) {
+                console.log("CANH BAO: duoi 850 SP - nghi bi chan mot phan hoac API doi.");
+                process.exitCode = 1;
+              } else {
+                console.log("KET LUAN: IP cloud KHONG bi chan - scrape.yml giu nguyen goi thang.");
+              }
+            '
+          else
+            echo "KHONG co file output -> apc_api.js that bai hoan toan."
+            echo "Xem probe.log o tren: neu la EMPTY_BODY hoac 403 thi chay lai"
+            echo "voi apc_probe_use_proxy = true de xac dinh co phai bi chan IP."
+            exit 1
+          fi
+
+      - name: Upload ket qua probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apc-probe
+          path: apc-probe-output/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Segment Audit — 02/09/2026.
+  # Doi chieu tung dong trong tab "Segment" voi bo luat chuan hoa
+  # (spec_normalize.js + spec_dictionary.js), in ra dong nao sai quy luat.
+  #
+  # CHI DOC: scope spreadsheets.readonly, khong co duong nao ghi vao Sheet.
+  # Phuc doc bao cao roi tu sua tay trong Sheet.
+  segment-audit:
+    name: Segment Audit (chi doc tab Segment)
+    if: ${{ inputs.run_all || inputs.run_segment_audit }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Mac dinh GITHUB_TOKEN trong workflow nay chi co quyen DOC -> push bi 403
+    # "Permission denied to github-actions[bot]". Job reenrich trong scrape.yml
+    # khai quyen nay o cap job, lam y het.
+    permissions:
+      contents: write
+    # Chan chay song song: 02/09 co 2 run reenrich dispatch sat nhau, ca hai
+    # cung commit mot file -> run sau fail o buoc rebase. Job nay cung ghi vao
+    # repo nen dinh y het.
+    concurrency:
+      group: segment-audit
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Cai googleapis
+        run: npm install googleapis --no-audit --no-fund
+
+      - name: Doi chieu tab Segment
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: node audit_segment.js
+
+      - name: Commit ket qua vao repo
+        if: always()
+        shell: bash
+        run: |
+          # Commit thang vao repo thay vi chi upload artifact: artifact phai tai
+          # ve roi giai nen, con file trong repo thi GitHub render .csv thanh
+          # BANG xem duoc ngay tren trinh duyet hoac dien thoai.
+          if [ ! -d segment-audit ]; then echo "khong co thu muc segment-audit"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add segment-audit/
+          if git diff --cached --quiet; then
+            echo "Khong co thay doi — bo qua commit."
+            exit 0
+          fi
+          git commit -m "chore(segment-audit): cap nhat ket qua kiem tra tab Segment [skip ci]"
+          # Buoc "Cai googleapis" o tren lam doi package.json + package-lock.json.
+          # git pull --rebase tu choi chay khi con thay doi chua commit, nen phai
+          # vut bo chung TRUOC. An toan: day la ban checkout moi tren runner,
+          # khong co gi dang giu.
+          git checkout -- . 2>/dev/null || true
+          # Job khac (reenrich/scrape) cung push vao main -> rebase roi thu lai
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            echo "push lan $i that bai, thu lai..."
+            sleep 5
+          done
+          echo "Khong push duoc sau 3 lan — ket qua van con trong artifact."
+          exit 1
+
+      - name: Upload ket qua
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: segment-audit
+          path: segment-audit/
+          retention-days: 14
+          if-no-files-found: warn
