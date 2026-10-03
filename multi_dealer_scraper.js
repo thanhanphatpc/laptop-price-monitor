@@ -715,6 +715,104 @@ function mapSpecsCPS(raw) {
   return { cpu, ram, storage, screen, gpu, weight };
 }
 
+// ── 03/10/2026 [An Phat PC]: lấy thông số CPS bằng HTTP thuần ──────────
+// Ten SP tren listing CellphoneS KHONG co cau hinh, va viec dieu huong
+// Puppeteer sang trang chi tiet da bi tat tu v3.4.10 (loi "detached Frame").
+// Cach nay chi tai HTML trang chi tiet bang fetch() (giong checkStockHTTP —
+// da chay on dinh), boc bang thong so ra roi map qua mapSpecsCPS() co san.
+// Chi lay cho SP CHUA tung co CPU trong dashboard/data.csv (lich su 35 ngay),
+// nen sau vai ngay dau gan nhu khong ton request nao nua.
+const CPS_SPEC_HTTP_CAP = 60;          // toi da SP/brand/lan chay
+const CPS_SPEC_HTTP_BUDGET_MS = 120000; // toi da 2 phut/brand
+let _cpsKnownSpecLinks = null;
+function cpsKnownSpecLinks() {
+  if (_cpsKnownSpecLinks) return _cpsKnownSpecLinks;
+  _cpsKnownSpecLinks = new Set();
+  try {
+    const txt = fs.readFileSync(path.join(__dirname, 'dashboard', 'data.csv'), 'utf8');
+    // CSV co o chua xuong dong trong ngoac kep (cot Change) -> parse dung chuan
+    let row = [], f = '', q = false;
+    const take = () => {
+      if (row[2] === 'CellPhone S' && row[13] && row[20]) _cpsKnownSpecLinks.add(row[20]);
+      row = [];
+    };
+    for (let i = 0; i < txt.length; i++) {
+      const c = txt[i];
+      if (q) { if (c === '"') { if (txt[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(f); f = ''; }
+      else if (c === '\n') { row.push(f); f = ''; take(); }
+      else if (c !== '\r') f += c;
+    }
+  } catch (_) {}
+  console.log(`    ℹ CPS: ${_cpsKnownSpecLinks.size} link da co thong so trong data.csv`);
+  return _cpsKnownSpecLinks;
+}
+function decodeHtml(s) {
+  return String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\\u002F/g, '/').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
+}
+const CPS_SPEC_LABELS = ['Loại CPU', 'Dung lượng RAM', 'Loại RAM', 'Ổ cứng', 'Kích thước màn hình',
+  'Công nghệ màn hình', 'Loại card đồ họa', 'Trọng lượng', 'Khối lượng'];
+function parseCpsSpecHtml(html) {
+  const raw = {};
+  // (1) bang HTML: <tr ...><td>Nhan</td><td>Gia tri</td></tr>
+  const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi; let m;
+  while ((m = trRe.exec(html))) {
+    const tds = [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(x => decodeHtml(x[1]));
+    if (tds.length >= 2 && CPS_SPEC_LABELS.includes(tds[0]) && tds[1] && !raw[tds[0]]) raw[tds[0]] = tds[1];
+  }
+  // (2) du lieu JSON nhung trong trang (Nuxt state): "Loại CPU" ... "value":"..."
+  if (!raw['Loại CPU']) {
+    for (const label of CPS_SPEC_LABELS) {
+      if (raw[label]) continue;
+      const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const j = html.match(new RegExp('"' + esc + '"[\\s\\S]{0,400}?"(?:value|content|val)"\\s*:\\s*"((?:[^"\\\\]|\\\\.){1,300})"'));
+      if (j) raw[label] = decodeHtml(j[1]);
+    }
+  }
+  return raw;
+}
+async function fetchSpecsCPSHttp(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+      },
+      signal: controller.signal, redirect: 'follow',
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const raw = parseCpsSpecHtml(await res.text());
+    if (!raw['Loại CPU'] && !raw['Dung lượng RAM']) return null;
+    return mapSpecsCPS(raw);
+  } catch { return null; }
+}
+async function enrichCPSSpecsHTTP(products) {
+  const known = cpsKnownSpecLinks();
+  const todo = products.filter(p => !p.cpu && !known.has(p.link)).slice(0, CPS_SPEC_HTTP_CAP);
+  if (!todo.length) return;
+  const t0 = Date.now(); let ok = 0, tried = 0;
+  for (let i = 0; i < todo.length; i += 4) {
+    if (Date.now() - t0 > CPS_SPEC_HTTP_BUDGET_MS) { console.log('    ⏱ CPS spec HTTP: het 2 phut, dung'); break; }
+    const batch = todo.slice(i, i + 4);
+    const res = await Promise.all(batch.map(p => fetchSpecsCPSHttp(p.link)));
+    res.forEach((spec, k) => {
+      tried++;
+      if (!spec) return;
+      const p = batch[k];
+      for (const f of ['cpu', 'ram', 'storage', 'screen', 'gpu', 'weight']) if (!p[f] && spec[f]) p[f] = spec[f];
+      known.add(p.link); ok++;
+    });
+    await sleep(400);
+  }
+  console.log(`    🔎 CPS spec HTTP: lay duoc thong so ${ok}/${tried} SP moi`);
+}
+
 // ── enrichSpecs: fetch specs cho SP chưa có, dừng khi hết deadline ──
 async function enrichSpecs(products, specCache, fetchFn, page, startTime, deadlineMs, skipNewFetch) {
   const effectiveDeadline = deadlineMs || DEADLINE_MS;
@@ -1732,6 +1830,8 @@ async function scrapeCPS(page, brand, specCache, startTime) {
   // TRẢ VỀ trong "products" bên dưới, chỉ là thiếu spec chi tiết (không sao,
   // vì đã hết hàng thì spec không còn quan trọng bằng chính trạng thái).
   await enrichSpecs(inStock, specCache, fetchSpecsCPS, page, startTime, undefined, true);
+  // 03/10/2026 [An Phat PC]: bo sung thong so qua HTTP cho SP chua co (ke ca SP het hang)
+  try { await enrichCPSSpecsHTTP(products); } catch (e) { console.log(`    ⚠ CPS spec HTTP loi: ${e.message}`); }
   return products;
 }
 
