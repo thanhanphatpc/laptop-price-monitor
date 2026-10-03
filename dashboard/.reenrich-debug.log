@@ -1,11 +1,12 @@
-[2026-09-19T06:35:06.473Z] --- Bắt đầu reenrich-dashboard-csv.js ---
-[2026-09-19T06:35:07.861Z] Đọc data.csv hiện có: 74627 dòng.
-[2026-09-19T06:35:07.861Z] Đọc Part # (FORMULA render)...
-[2026-09-19T06:35:08.232Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, giữ nguyên spec thô hiện có trong data.csv.
-[2026-09-19T06:35:08.233Z] Đọc Segment (FORMULA render)...
-[2026-09-19T06:35:08.355Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
-[2026-09-19T06:35:08.355Z] Part# header index: {}
-[2026-09-19T06:35:08.355Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
-[2026-09-19T06:35:08.356Z] Part# map: 0 SKU
-[2026-09-19T06:35:09.357Z] Re-enrich xong: 0/74627 dòng khớp Part # (loại 0 SP EOL), 47129 dòng được chuẩn hoá spec.
-[2026-09-19T06:35:10.086Z] ✅ Đã ghi lại /home/runner/work/laptopspects/laptopspects/dashboard/data.csv — 74628 dòng (kể cả header), 25254 KB
+[2026-10-03T07:33:23.701Z] --- Bắt đầu reenrich-dashboard-csv.js ---
+[2026-10-03T07:33:25.260Z] Đọc data.csv hiện có: 85344 dòng.
+[2026-10-03T07:33:25.261Z] Đọc Part # (FORMULA render)...
+[2026-10-03T07:33:25.635Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, giữ nguyên spec thô hiện có trong data.csv.
+[2026-10-03T07:33:25.635Z] Đọc Segment (FORMULA render)...
+[2026-10-03T07:33:25.802Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
+[2026-10-03T07:33:25.803Z] Part# header index: {}
+[2026-10-03T07:33:25.803Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
+[2026-10-03T07:33:25.803Z] Part# map: 0 SKU
+[2026-10-03T07:33:29.218Z] name_enrich: +thong so tu ten 0 dong, +tra cheo model code 0 dong, +Part# 0 dong, +dong may 173 dong
+[2026-10-03T07:33:29.219Z] Re-enrich xong: 0/85344 dòng khớp Part # (loại 0 SP EOL), 0 dòng được chuẩn hoá spec.
+[2026-10-03T07:33:29.998Z] ✅ Đã ghi lại /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 85345 dòng (kể cả header), 29665 KB
