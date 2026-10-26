@@ -289,7 +289,7 @@ const SHEET_NAME   = 'Daily SRP Tracking'; // v3.6.1: doi ten tab tu "RAW DATA" 
 // ton tai duoi dang apc_api.js (job rieng, ghi products-APC.json). Van dang ky
 // o day de: (a) writeToSheet biet duoc phep xoa dong cu cua 'An Phat',
 // (b) checkCoverage/byDealer dem duoc no trong COMBINE_MODE.
-const DEALER_KEY_TO_NAME = { MBW: 'MBW', FPT: 'FPT Retail', CPS: 'CellPhone S', PV: 'Phong Vu', APC: 'An Phat' };
+const DEALER_KEY_TO_NAME = { MBW: 'MBW', FPT: 'FPT Retail', CPS: 'CellPhone S', PV: 'Phong Vu', APC: 'An Phat', NK: 'Nguyen Kim' };
 const SCRAPE_DEALERS_RAW = (process.env.SCRAPE_DEALERS || 'MBW,FPT,CPS')
   .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
 const SCRAPE_DEALERS = new Set(SCRAPE_DEALERS_RAW);

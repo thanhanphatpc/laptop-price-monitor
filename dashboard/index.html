@@ -2318,8 +2318,14 @@ function rebuildDropdowns() {
   // Dealer: sinh TU DU LIEU chu khong cung trong HTML. Truoc day 2 dropdown
   // dealer liet ke cung 4 dealer, nen An Phat khong xuat hien trong bo loc du
   // da co 937 SP. Lam kieu nay thi dealer moi tu hien, khong phai sua HTML.
-  rebuildSel('d_dealer', [...new Set(changes.map(p=>p.dealer).filter(Boolean))].sort(), 'All Dealers');
-  rebuildSel('as_dealer', [...new Set(allToday.map(p=>p.dealer).filter(Boolean))].sort(), 'All Dealers');
+  //
+  // FIX 26/10/2026: dung allUnique (tat ca SP hom nay + historical) thay vi
+  // changes (chi SP co thay doi gia) de tranh dealer bien mat khoi dropdown
+  // vao ngay khong co bien dong gia (vd MBW ngay 26/10 co 0 bien dong -> bien
+  // mat). allUnique luon chua du toan bo dealer co mat trong du lieu.
+  const allDealerSrc = allUnique.length > 0 ? allUnique : allToday;
+  rebuildSel('d_dealer', [...new Set(allDealerSrc.map(p=>p.dealer).filter(Boolean))].sort(), 'All Dealers');
+  rebuildSel('as_dealer', [...new Set(allDealerSrc.map(p=>p.dealer).filter(Boolean))].sort(), 'All Dealers');
 
   // drops tab — d_brand, d_series, d_gpu, d_cpu (all <select> + Tom Select)
   rebuildSel('d_brand', [...new Set(changes.map(p=>p.brand).filter(Boolean))].sort(), 'All Vendors');
