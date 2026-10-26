@@ -1117,9 +1117,121 @@ async function checkMissingProducts(browser, dealerName, candidates, specCache) 
   return out;
 }
 
+// ── MBW qua API JSON (26/10/2026) ─────────────────────────────────────
+// thegioididong.com doi sang Next.js: nut "Xem thêm" goi
+//   POST https://api.thegioididong.com/gw/bus-tgdd-tmdt/api/Cate/GetproductCateV2
+// KHONG can token (da thu: chi can header os/platform/siteid/provinceid),
+// pageSize toi da >= 100, tra ve totalProduct de doi chieu. productNameSKU la
+// dung dinh dang ten cu ("Laptop HP 240R G10 - C3RU7AT (Core 5 120U, 16GB,...)")
+// nen lich su SKU/gia van noi lien. Thu truc tiep tu runner truoc; neu bi chan
+// (IP datacenter) thi di qua Cloudflare Worker (target `mbwapi`, can Worker ban
+// moi — xem cloudflare-worker/mbw-proxy-worker.js).
+const MBW_API_PATH = '/gw/bus-tgdd-tmdt/api/Cate/GetproductCateV2';
+const MBW_API_PAGE_SIZE = 100;
+
+function mapMbwApiProduct(p) {
+  const pr = (p.productPrices && p.productPrices[0]) || {};
+  const price = Math.round(Number(pr.price) || 0);
+  const sys = Math.round(Number(pr.sysPrice) || 0);
+  const name = (p.productNameSKU || p.name || '').trim();
+  const ksp = ((p.lstKeySellingPoint && p.lstKeySellingPoint[0] && p.lstKeySellingPoint[0].label) || '');
+  const ramM = ksp.match(/RAM\s*(\d+)\s*GB/i);
+  const ssdM = ksp.match(/(?:SSD|HDD)\s*(\d+)\s*(GB|TB)/i);
+  const cpu = (name.match(/\b(Celeron[,\s]*N?\d{4}|Pentium[,\s]*(Silver|Gold)?\s?N?\d{4,5}|Snapdragon\s?X\S*|i[3579]-?\d{4,5}[A-Z]{0,3}|Ultra\s?\d\s?\d{3}[A-Z]?|U[579]\s?\d{2,3}[A-Z]?|Core\s?\d\s?\d{2,3}[A-Z]?|R[3579]\s?\d{3,4}[A-Z]{0,3}|Ryzen\s?(AI\s?)?[3579]\s?\d{2,4}[A-Z]{0,3}|X1\s?\d{2}\s?\d{2,3}|M\d(\s?(Pro|Max|Ultra))?)\b/i) || [''])[0];
+  const gpu = (name.match(/\b(RTX\s?\d{4}\w*|GTX\s?\d{4}\w*|RX\s?\d{4}\w*|Arc\s?\w+)\b/i) || [''])[0];
+  const pct = Number(pr.discountPercent) || 0;
+  let stockStatus = 'Còn hàng';
+  if (!price) stockStatus = 'Chưa rõ';
+  else if (pr.isCanBuy === false) stockStatus = 'Tạm hết hàng';
+  const url = String(p.url || '').replace(/^\//, '');
+  return {
+    dealer: 'MBW', name,
+    brand: (p.brand && p.brand.brandName) || '',
+    cpu, screen: '', gpu, weight: '',
+    ram: ramM ? `${ramM[1]}GB` : '',
+    storage: ssdM ? `${ssdM[1]}${ssdM[2].toUpperCase()}` : '',
+    origPrice: sys > price ? sys : 0,
+    salePrice: price,
+    discount: pct > 0 ? `-${pct}%` : '',
+    sold: p.totalSold || '',
+    rating: p.rate ? String(p.rate) : '',
+    link: url ? `https://www.thegioididong.com/${url}` : '',
+    stockStatus,
+  };
+}
+
+async function fetchMbwApiFrom(baseUrl, extraHeaders) {
+  const all = [];
+  const seen = new Set();
+  let total = null;
+  for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 30000);
+    let resp;
+    try {
+      resp = await fetch(baseUrl + MBW_API_PATH, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: Object.assign({
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/plain, */*',
+          'os': 'WebTGDD', 'platform': '1', 'siteid': '1', 'provinceid': '1027',
+          'Origin': 'https://www.thegioididong.com',
+          'Referer': 'https://www.thegioididong.com/laptop',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        }, extraHeaders || {}),
+        body: JSON.stringify({
+          pageIndex, pageSize: MBW_API_PAGE_SIZE, provinceId: 1027,
+          urlCate: 'laptop', cateId: '17',
+          filters: [{ filterId: 1, filterTypeId: 6, sortName: 'FEATURED_PRODUCTS', url: '' }],
+        }),
+      });
+    } finally { clearTimeout(to); }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const j = await resp.json();
+    const list = j && j.data && j.data.products;
+    if (!Array.isArray(list)) throw new Error(`cấu trúc lạ: ${JSON.stringify(j).slice(0, 120)}`);
+    if (total === null && j.data.totalProduct) total = j.data.totalProduct;
+    let added = 0;
+    for (const p of list) {
+      const key = p.url || p.id;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      all.push(mapMbwApiProduct(p));
+      added++;
+    }
+    if (list.length < MBW_API_PAGE_SIZE || added === 0) break;
+    if (total && all.length >= total) break;
+  }
+  if (total && all.length < total * 0.9) throw new Error(`lấy thiếu ${all.length}/${total}`);
+  return { items: all, total };
+}
+
+async function fetchMbwViaApi() {
+  const routes = [{ label: 'trực tiếp', base: 'https://api.thegioididong.com', headers: {} }];
+  if (PROXY_HOST) routes.push({ label: 'qua Worker (mbwapi)', base: `${PROXY_HOST}/__proxy/mbwapi`, headers: {} });
+  for (const r of routes) {
+    try {
+      const { items, total } = await fetchMbwApiFrom(r.base, r.headers);
+      if (items.length > 0) {
+        console.log(`    ✓ [MBW] API ${r.label}: ${items.length}/${total || '?'} SP`);
+        return items;
+      }
+      console.log(`    ⚠ [MBW] API ${r.label}: 0 SP`);
+    } catch (e) {
+      console.log(`    ⚠ [MBW] API ${r.label} lỗi: ${String(e.message || e).slice(0, 140)}`);
+    }
+  }
+  return [];
+}
+
 // ── SCRAPER 1 — MBW ──────────────────────────────────────
 async function scrapeMBW(page) {
   console.log('  [MBW] Trang tổng /laptop');
+  // Uu tien API JSON (on dinh hon cao DOM). Neu that bai moi quay ve doc trang.
+  const apiItems = await fetchMbwViaApi();
+  if (apiItems.length > 0) return apiItems;
+  console.log('    ↪ API không dùng được — quay về đọc trang /laptop');
 
   // Khi dùng proxy: trang chính được load qua PROXY_HOST, nhưng các AJAX call
   // ("Xem thêm" load more) mà page tự phát ra vẫn có thể trỏ thẳng tới
@@ -1138,6 +1250,19 @@ async function scrapeMBW(page) {
   }
   await sleep(2000);
 
+  // FIX 26/10/2026: thegioididong.com doi layout (Next.js/Tailwind) tu ~07/10:
+  // KHONG con ul.listproduct li.item a.main-contain -> scraper tra 0 SP, MBW
+  // mat gia 19 ngay. The SP moi: <a href="/laptop/<slug>" title="<ten>"> nam
+  // trong 1 DIV card; nut tai them: <button>Xem thêm N Laptop</button>.
+  // Van giu selector cu lam fallback phong khi site doi nguoc lai.
+  const countCards = () => page.evaluate(() => {
+    const old = document.querySelectorAll('ul.listproduct li.item a.main-contain').length;
+    if (old) return old;
+    return new Set([...document.querySelectorAll('a[href^="/laptop/"][title]')]
+      .map(a => a.getAttribute('href'))).size;
+  }).catch(() => 0);
+  for (let w = 0; w < 10 && (await countCards()) === 0; w++) await sleep(2000);
+
   // Loop: scroll xuống để "Xem thêm" visible → click → chờ load → repeat
   let clicks = 0;
   let prevCount = 0;
@@ -1150,6 +1275,16 @@ async function scrapeMBW(page) {
     const result = await page.evaluate(() => {
       // 1) CSS selectors — chú ý: class "view-more" nằm trên DIV bọc ngoài,
       //    thẻ <a> click được nằm BÊN TRONG → cần ".view-more a" (descendant)
+      // Layout moi (26/10/2026): <button>Xem thêm 421 Laptop</button> — uu tien
+      // truoc, tranh nham voi nut "Xem thêm" cua khoi bai viet SEO cuoi trang.
+      const newBtn = [...document.querySelectorAll('button, a')].find(el =>
+        /xem\s*thêm\s*\d+\s*laptop/i.test(el.textContent || '') && el.offsetParent !== null
+      );
+      if (newBtn) {
+        newBtn.scrollIntoView({ block: 'center' });
+        newBtn.click();
+        return { clicked: true, selector: 'text:Xem thêm N Laptop' };
+      }
       const selectors = [
         '.view-more a', 'div.view-more a', '[class*="view-more"] a',
         'a.view-more', 'button.view-more', '.view-more-btn',
@@ -1181,13 +1316,12 @@ async function scrapeMBW(page) {
 
     if (!result.clicked) break;
     clicks++;
+    if (clicks >= 80) { console.log('    ⚠ Chạm trần 80 lần bấm "Xem thêm" — dừng'); break; }
     await sleep(3500); // tăng wait: proxy AJAX render cần thêm thời gian
 
     // BUG FIX: đếm a.main-contain (product thực) không đếm banner/skeleton
     // Tăng threshold 2→3 để chịu được 1 lần proxy lag.
-    const count = await page.evaluate(() =>
-      document.querySelectorAll('ul.listproduct li.item a.main-contain').length
-    );
+    const count = await countCards();
     if (count === prevCount) {
       stagnant++;
       if (stagnant >= 3) break;
@@ -1198,12 +1332,8 @@ async function scrapeMBW(page) {
   }
   console.log(`    → Clicked "Xem thêm": ${clicks} lần`);
 
-  const totalItems = await page.evaluate(() =>
-    document.querySelectorAll('ul.listproduct li.item').length
-  );
-  const productItems = await page.evaluate(() =>
-    document.querySelectorAll('ul.listproduct li.item a.main-contain').length
-  );
+  const productItems = await countCards();
+  const totalItems = productItems;
   console.log(`    → Tổng items trên trang: ${totalItems} (products: ${productItems})`);
 
   if (totalItems === 0) {
@@ -1217,6 +1347,61 @@ async function scrapeMBW(page) {
       console.log(`    🔍 diag: title="${diag.title}" url=${diag.url} bodyLen=${diag.bodyLen}`);
       console.log(`    🔍 body: ${diag.bodySnippet}`);
     }
+  }
+
+  // ── Layout MOI (26/10/2026): the SP = <a href="/laptop/slug" title="ten"> trong
+  // 1 DIV card. Gia nam o cac dong text dang "22.990.000đ" (gia ban, roi gia
+  // goc), chip "RAM 16 GB" / "SSD 512 GB". Qua tang "Quà 100.000₫" co chu nen
+  // KHONG khop regex dong-gia-thuan. CPU/GPU suy tu ten; man hinh/can nang de
+  // enrichment theo Part# dien (nhu cac nguon khac).
+  const newLayoutItems = await page.evaluate((BASE) => {
+    const out = [], seen = new Set();
+    const BRANDS = [['macbook','Apple'],['apple','Apple'],['asus','Asus'],['acer','Acer'],['lenovo','Lenovo'],['dell','Dell'],['hp','Hp'],['msi','Msi'],['gigabyte','Gigabyte'],['lg','Lg'],['huawei','Huawei'],['samsung','Samsung'],['surface','Microsoft'],['microsoft','Microsoft'],['thunderobot','Thunderobot'],['singpc','Singpc'],['avita','Avita'],['xiaomi','Xiaomi']];
+    const priceRe = /^\d{1,3}(?:\.\d{3})+\s*[đ₫]$/;
+    document.querySelectorAll('a[href^="/laptop/"][title]').forEach(a => {
+      const href = a.getAttribute('href') || '';
+      if (!href || seen.has(href)) return;
+      // Leo len card lon nhat con chua <= 1 link san pham khac nhau
+      let card = a;
+      while (card.parentElement) {
+        const par = card.parentElement;
+        const hs = new Set([...par.querySelectorAll('a[href^="/laptop/"]')].map(x => x.getAttribute('href')));
+        if (hs.size > 1) break;
+        card = par;
+      }
+      const lines = (card.innerText || '').split('\n').map(x => x.trim()).filter(Boolean);
+      const prices = lines.filter(l => priceRe.test(l)).map(l => parseInt(l.replace(/\D/g, ''), 10));
+      if (!prices.length) return;
+      seen.add(href);
+      const name = (a.getAttribute('title') || '').trim();
+      const salePrice = prices[0];
+      const origPrice = prices[1] && prices[1] > salePrice ? prices[1] : 0;
+      const discount = lines.find(l => /^-\d+%$/.test(l)) || '';
+      const chip = (kw) => {
+        const re = new RegExp('^' + kw + '\\s', 'i');
+        const l = lines.find(x => re.test(x));
+        return l ? l.replace(new RegExp('^' + kw + '\\s*', 'i'), '').replace(/\s+/g, '') : '';
+      };
+      const lname = name.toLowerCase();
+      const brand = (BRANDS.find(([k]) => new RegExp('(^|[^a-z])' + k + '([^a-z]|$)').test(lname)) || ['', ''])[1];
+      const cardText = lines.join(' ').toLowerCase();
+      const stock = /tạm hết hàng|hết hàng|out of stock/.test(cardText) ? 'Tạm hết hàng'
+        : /ngừng kinh doanh|ngừng bán/.test(cardText) ? 'Ngừng KD'
+        : /sắp về|pre.?order|đặt trước/.test(cardText) ? 'Hàng sắp về' : 'Còn hàng';
+      const cpu = (name.match(/\b(Celeron[,\s]*N?\d{4}|Pentium[,\s]*(Silver|Gold)?\s?N?\d{4,5}|Snapdragon\s?X\S*|i[3579]-?\d{4,5}[A-Z]{0,3}|Ultra\s?\d\s?\d{3}[A-Z]?|U[579]\s?\d{2,3}[A-Z]?|Core\s?\d\s?\d{2,3}[A-Z]?|R[3579]\s?\d{3,4}[A-Z]{0,3}|Ryzen\s?(AI\s?)?[3579]\s?\d{2,4}[A-Z]{0,3}|X1\s?\d{2}\s?\d{2,3}|M\d(\s?(Pro|Max|Ultra))?)\b/i) || [''])[0];
+      const gpu = (name.match(/\b(RTX\s?\d{4}\w*|GTX\s?\d{4}\w*|RX\s?\d{4}\w*|Arc\s?\w+)\b/i) || [''])[0];
+      out.push({
+        dealer: 'MBW', name, brand, cpu, screen: '', gpu, weight: '',
+        ram: chip('RAM'), storage: chip('SSD') || chip('HDD'),
+        origPrice, salePrice, discount, sold: '', rating: '',
+        link: BASE + href, stockStatus: stock,
+      });
+    });
+    return out;
+  }, 'https://www.thegioididong.com').catch(() => []);
+  if (newLayoutItems.length > 0) {
+    console.log(`    ✓ Layout mới: ${newLayoutItems.length} SP (${newLayoutItems.filter(x => x.origPrice).length} có giá gốc)`);
+    return newLayoutItems;
   }
 
   return page.evaluate((BASE) => {

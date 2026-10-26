@@ -16,7 +16,12 @@ const TARGETS = {
   fpt: 'fptshop.com.vn',
   cps: 'cellphones.com.vn',
   apc: 'www.anphatpc.com.vn',
+  // 26/10/2026: API JSON cua thegioididong (nut "Xem them" / lay danh sach SP)
+  mbwapi: 'api.thegioididong.com',
 };
+
+// Target nao can gia Origin/Referer khac host dich (API chi tin Origin = www).
+const ORIGIN_OVERRIDE = { mbwapi: 'https://www.thegioididong.com' };
 
 const DEFAULT_TARGET_HOST = TARGETS.mbw; // backward-compat fallback
 
@@ -43,8 +48,9 @@ export default {
     // Clone and adjust headers for the upstream request.
     const upstreamHeaders = new Headers(request.headers);
     upstreamHeaders.set('Host', targetHost);
-    upstreamHeaders.set('Origin', targetOrigin);
-    upstreamHeaders.set('Referer', targetOrigin + '/');
+    const spoofOrigin = (m && ORIGIN_OVERRIDE[m[1]]) || targetOrigin;
+    upstreamHeaders.set('Origin', spoofOrigin);
+    upstreamHeaders.set('Referer', spoofOrigin + '/');
     upstreamHeaders.delete('cf-connecting-ip');
     upstreamHeaders.delete('cf-ray');
     upstreamHeaders.delete('cf-visitor');
