@@ -145,8 +145,13 @@ function mapProduct(p) {
 
       // Response co dang { data: { list: [...], total: N } } hoac { list: [...], total: N }
       const data = r.json;
-      const list = (data.data && data.data.list) || data.list || (Array.isArray(data.data) ? data.data : null);
-      const total = (data.data && data.data.total) || data.total;
+      // Cau truc thuc te (xac nhan 26/10/2026): { data: { pages, total, page, limit, data: [...] } }
+      const inner = data.data;
+      const list = (inner && Array.isArray(inner.data) && inner.data)
+        || (inner && Array.isArray(inner.list) && inner.list)
+        || (Array.isArray(data.list) ? data.list : null)
+        || (Array.isArray(inner) ? inner : null);
+      const total = (inner && inner.total) || data.total;
 
       if (!Array.isArray(list)) throw new Error(`API trang ${page} trả cấu trúc lạ: ${JSON.stringify(data).slice(0, 200)}`);
       if (apiTotal === null && typeof total === 'number') apiTotal = total;
