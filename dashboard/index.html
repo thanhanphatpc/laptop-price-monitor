@@ -1240,8 +1240,66 @@ const PRICE_SEG_LABELS = {
   '25-30':'25–30M','30-40':'30–40M','40-50':'40–50M','ov50':'Over 50M'
 };
 
-let _asSortCol = 'price'; // field to sort by
-let _asSortDir = 1;       // 1=asc, -1=desc
+// ── 26/10/2026: All SKUs = ma tran so sanh gia 5 dealer (chi gia hien tai) ──
+// Ghep SKU giua cac dealer theo Part# (moi hang chi co 1 cach dat Part#):
+//  - HP / Lenovo / Gigabyte / Dell: lay doan cuoi sau dau '-' (ma SKU that);
+//  - hang khac: lay nguyen Part#; neu thieu Part# thi lay "(MA)" cuoi ten.
+const AS_DEALERS = ['An Phat','MBW','Phong Vu','CellPhone S','Nguyen Kim'];
+const AS_DEALER_LABEL = {'An Phat':'An Phát','MBW':'MBW','Phong Vu':'Phong Vũ','CellPhone S':'CellphoneS','Nguyen Kim':'Nguyễn Kim'};
+const AS_LAST_SEG_BRANDS = ['hp','lenovo','gigabyte','dell'];
+const AS_KNOWN_BRANDS = ['asus','acer','lenovo','dell','hp','msi','apple','gigabyte','lg','huawei','samsung','microsoft','thunderobot','singpc','avita','xiaomi','vaio','masstel'];
+function asBrandKey(p) {
+  let v = (p.brand||'').toLowerCase().trim();
+  if (v === 'macbook') v = 'apple';
+  if (AS_KNOWN_BRANDS.includes(v)) return v;
+  const n = (p.model||'').toLowerCase();
+  if (n.includes('macbook')) return 'apple';
+  for (const b of AS_KNOWN_BRANDS) if (new RegExp('(^|[^a-z])'+b+'([^a-z]|$)').test(n)) return b;
+  return v || '?';
+}
+function asMatchKey(p) {
+  const b = asBrandKey(p);
+  let part = (p.partNum||'').trim();
+  if (!part) {
+    const m = (p.model||'').trim().match(/\(([A-Za-z0-9][A-Za-z0-9.\-\/]{4,})\)\s*$/);
+    if (m) part = m[1];
+    else if (b === 'dell') {
+      const m2 = (p.model||'').match(/\bDC\d{5}\w*[\s\-]+([A-Z0-9]{5,9})\b/);
+      if (m2) part = m2[1];
+    }
+  }
+  if (!part) return null;
+  if (AS_LAST_SEG_BRANDS.includes(b)) part = part.split(/[-\s]+/).pop();
+  const c = part.toLowerCase().replace(/[^a-z0-9]/g,'');
+  return (c.length >= 5 && /\d/.test(c) && /[a-z]/.test(c)) ? b+':'+c : null;
+}
+let _asGroupsCache = null, _asGroupsSrc = null;
+function asBuildGroups() {
+  const src = allToday;
+  if (_asGroupsCache && _asGroupsSrc === src && _asGroupsCache.n === src.length) return _asGroupsCache.list;
+  const map = new Map(), list = [];
+  src.forEach((p, i) => {
+    const price = p.todayPrice || p.kmPrice || 0;
+    if (!price || p.isStale) return;
+    const k = asMatchKey(p) || ('__solo'+i);
+    let g = map.get(k);
+    if (!g) { g = { key:k, members:[], prices:{} }; map.set(k, g); list.push(g); }
+    g.members.push(p);
+    const cur = g.prices[p.dealer];
+    if (!cur || price < cur.price) g.prices[p.dealer] = { price, link:p.link||'' };
+  });
+  list.forEach(g => {
+    g.rep = g.members.find(m => m.dealer === 'An Phat') || g.members[0];
+    const ps = Object.values(g.prices).map(x => x.price);
+    g.min = Math.min(...ps);
+    g.nDealers = ps.length;
+  });
+  _asGroupsCache = { list, n: src.length }; _asGroupsSrc = src;
+  return list;
+}
+
+let _asSortCol = 'p_An Phat'; // field to sort by
+let _asSortDir = 1;           // 1=asc, -1=desc
 
 function renderAllSkus() {
   const dF   = getMultiVal('as_dealer');
@@ -1254,277 +1312,134 @@ function renderAllSkus() {
   const sF   = (document.getElementById('as_search')?.value || '').toLowerCase();
   const psF  = getMultiVal('as_price');
 
-  // Use allUnique when available (after live CSV load) to show all historical models
-  // Falls back to allToday (DATA cache) on first load
-  let data = (allUnique.length > allToday.length ? allUnique : allToday).filter(p => {
+  const memberOk = p => {
     if (dF.length  && !dF.includes(p.dealer)) return false;
     if (sgF.length && !sgF.some(v=>isBP_or_gaming(p, v))) return false;
     if (brF.length) { const b=(p.brand||'').toLowerCase(); if(!brF.some(v=>b.includes(v.toLowerCase()))) return false; }
     if (srF.length  && !srF.includes(p.segment)) return false;
-    if (gpF.length) { if(!gpF.includes(p.gpuTag)) return false; }            // col R: GPU
-    if (cpF.length) { if(!cpF.includes(p.cpuFamily)) return false; }          // col M: CPU Segment
-    if (fcF.length && fcF.includes('yes') && !p.focusModel) return false;     // col W: Focus Model
+    if (gpF.length) { if(!gpF.includes(p.gpuTag)) return false; }
+    if (cpF.length) { if(!cpF.includes(p.cpuFamily)) return false; }
+    if (fcF.length && fcF.includes('yes') && !p.focusModel) return false;
     if (psF.length) {
       const price = p.todayPrice||p.kmPrice||0;
-      const inAnySeg = psF.some(seg => {
-        const [min,max] = parsePriceSeg(seg);
-        return price >= min && (max === 0 || price < max);
-      });
-      if (!inAnySeg) return false;
+      if (!psF.some(seg => { const [min,max] = parsePriceSeg(seg); return price >= min && (max === 0 || price < max); })) return false;
     }
     if (sF) {
-      const hay = [p.model,p.brand,p.cpuFamily,p.cpuDetail,
-                   p.gpuLabel||p.gpuTag,p.vram,p.ram,p.ssd,
-                   p.segment,p.dealer,p.disc||'',
-                   String(p.kmPrice||p.todayPrice||'')]
+      const hay = [p.model,p.brand,p.cpuFamily,p.cpuDetail,p.gpuLabel||p.gpuTag,p.vram,p.ram,p.ssd,
+                   p.segment,p.dealer,p.disc||'',String(p.kmPrice||p.todayPrice||'')]
         .filter(Boolean).map(v=>v.toLowerCase()).join(' ');
-      const matchesPlain = hay.includes(sF);
       const sFNorm = normPN(sF);
-      const matchesPN = sFNorm.length >= 4 &&
-        (normPN(p.model).includes(sFNorm) || normPN(p.partNum).includes(sFNorm));
-      if (!matchesPlain && !matchesPN) return false;
+      const okPN = sFNorm.length >= 4 && (normPN(p.model).includes(sFNorm) || normPN(p.partNum).includes(sFNorm));
+      if (!hay.includes(sF) && !okPN) return false;
     }
     return true;
-  });
-
-  // Helper: compute the price that actually appears in the "today" / "prev" columns
-  // for a given item, accounting for stale-row date shifting (see row renderer below).
-  // Without this, sorting by "price" used the raw todayPrice field even when that
-  // price is actually displayed in the prev/prev2 column for stale rows — causing
-  // sorted rows to show "-" in the column being sorted.
-  const shiftedPrices = (p) => {
-    if (p.isStale && p.latestDate) {
-      if (p.latestDate === prevDate) {
-        return { today: 0, prev: p.todayPrice||p.kmPrice||0, prev2: p.prevPrice||0 };
-      } else if (p.latestDate === prev2Date) {
-        return { today: 0, prev: 0, prev2: p.todayPrice||p.kmPrice||0 };
-      } else {
-        // FIX 14/08/2026: stale cũ hơn prev2 → ẩn giá khỏi TẤT CẢ cột giá.
-        // Trước đây: giá cũ bị đặt vào cột "today" → user thấy giá cũ ở header hôm nay (misleading).
-        return { today: 0, prev: 0, prev2: 0 };
-      }
-    }
-    return { today: p.todayPrice||p.kmPrice||0, prev: p.prevPrice||0, prev2: p.prev2Price||0 };
   };
 
-  // sort — stale rows sink to bottom unless sorting by model/dealer/brand
+  const data = asBuildGroups().filter(g => g.members.some(memberOk));
+
+  const numOf = s => parseInt((s||'0').match(/\d+/)?.[0])||0;
   data.sort((a,b) => {
-    // Push stale rows to bottom for numeric sorts (price/sold)
-    // Không sort stale xuống cuối nữa — giá đã ở đúng cột, sort bình thường
-    // Chỉ stale cũ hơn prev2 mới sink xuống cuối
-    const numericSort = ['price','prev','prev2','sold'].includes(_asSortCol);
-    // NOTE: isStale is `true` or simply absent (undefined) on fresh items — never
-    // explicitly `false`. Comparing `aOld !== bOld` without boolean coercion treats
-    // `false !== undefined` as true, triggering a hard-coded -1/1 return that
-    // completely ignores _asSortDir. Coercing with !! fixes this.
-    const aOld = !!(a.isStale && a.latestDate !== prevDate && a.latestDate !== prev2Date);
-    const bOld = !!(b.isStale && b.latestDate !== prevDate && b.latestDate !== prev2Date);
-    if (numericSort && aOld !== bOld) return aOld ? 1 : -1;
-    let va, vb;
     const fn = _asSortCol;
-    if (fn === 'price')   { const sa=shiftedPrices(a), sb=shiftedPrices(b); va=sa.today; vb=sb.today; }
-    else if (fn === 'prev')  { const sa=shiftedPrices(a), sb=shiftedPrices(b); va=sa.prev; vb=sb.prev; }
-    else if (fn === 'prev2') { const sa=shiftedPrices(a), sb=shiftedPrices(b); va=sa.prev2; vb=sb.prev2; }
-    else if (fn === 'gpu')   { va=a.gpuLabel||a.gpuTag||''; vb=b.gpuLabel||b.gpuTag||''; }
-    else if (fn === 'cpu')   { va=a.cpuDetail||a.cpuFamily||''; vb=b.cpuDetail||b.cpuFamily||''; }
-    else if (fn === 'ram')   { va=parseInt((a.ram||'0').match(/\d+/)?.[0])||0; vb=parseInt((b.ram||'0').match(/\d+/)?.[0])||0; }
-    else if (fn === 'ssd')   { va=parseInt((a.ssd||'0').match(/\d+/)?.[0])||0; vb=parseInt((b.ssd||'0').match(/\d+/)?.[0])||0; }
-    else if (fn === 'brand') { va=a.brand||''; vb=b.brand||''; }
-    else if (fn === 'segment') { va=a.segment||''; vb=b.segment||''; }
-    else if (fn === 'model') { va=a.model||''; vb=b.model||''; }
-    else if (fn === 'dealer'){ va=a.dealer||''; vb=b.dealer||''; }
-    else { va=0; vb=0; }
-    // Missing values (0) always sink to bottom for numeric price/sold sorts,
-    // regardless of asc/desc direction — otherwise they jump to the top on ascending sort.
-    if (numericSort) {
-      const aZero = !va, bZero = !vb;
-      if (aZero && !bZero) return 1;
-      if (bZero && !aZero) return -1;
-      if (aZero && bZero) return 0;
+    let va, vb, numeric = false;
+    if (fn.startsWith('p_')) { const d=fn.slice(2); va=a.prices[d]?.price||0; vb=b.prices[d]?.price||0; numeric = true; }
+    else if (fn === 'gpu')   { va=a.rep.gpuLabel||a.rep.gpuTag||''; vb=b.rep.gpuLabel||b.rep.gpuTag||''; }
+    else if (fn === 'cpu')   { va=a.rep.cpuDetail||a.rep.cpuFamily||''; vb=b.rep.cpuDetail||b.rep.cpuFamily||''; }
+    else if (fn === 'ram')   { va=numOf(a.rep.ram); vb=numOf(b.rep.ram); numeric = true; }
+    else if (fn === 'ssd')   { va=numOf(a.rep.ssd); vb=numOf(b.rep.ssd); numeric = true; }
+    else if (fn === 'brand') { va=a.rep.brand||''; vb=b.rep.brand||''; }
+    else if (fn === 'segment') { va=a.rep.segment||''; vb=b.rep.segment||''; }
+    else if (fn === 'model') { va=a.rep.model||''; vb=b.rep.model||''; }
+    else { va=a.min; vb=b.min; numeric = true; }
+    if (numeric) {
+      if (!va && vb) return 1;
+      if (!vb && va) return -1;
+      if (va !== vb) return (va-vb)*_asSortDir;
+      return a.min - b.min;
     }
-    if (typeof va==='number' && typeof vb==='number') return (va-vb)*_asSortDir;
     return va.toString().localeCompare(vb.toString(),'vi')*_asSortDir;
   });
 
+  const multiCnt = data.filter(g => g.nDealers > 1).length;
   const cnt = document.getElementById('as_count');
-  if (cnt) {
-    const staleCount = data.filter(p=>p.isStale).length;
-    const delisted = window.__delistedCount || 0;
-    const delistedTxt = delisted > 0 ? ` · ${delisted} delisted >${window.__delistedDays || 7}d` : '';
-    cnt.textContent = staleCount > 0
-      ? `${data.length} SKUs (${staleCount} no data today${delistedTxt})`
-      : `${data.length} SKUs${delistedTxt ? ' (' + delistedTxt.replace(' · ','') + ')' : ''}`;
-  }
+  if (cnt) cnt.textContent = `${data.length} SKUs (${multiCnt} có từ 2 nhà bán trở lên)`;
 
-  // determine if we have 3-day data
-  const has3 = !!prev2Date && data.some(p=>p.prev2Price);
-
-  // ── Build table ──────────────────────────────────────────────────
-  const C = 'text-align:center';
-  const L = 'text-align:left';
-  const NW = 'white-space:nowrap';
-
-  // Sort indicator helper
+  const C = 'text-align:center', L = 'text-align:left', NW = 'white-space:nowrap';
   const si = col => _asSortCol===col ? (_asSortDir===1?' ↑':' ↓') : '';
-  // thead sticky phải nằm NGAY DƯỚI filter-bar (cũng sticky top:0).
-  // 09/08/2026: KHÔNG đo offsetHeight ở đây nữa — đo 1 lần lúc render này
-  // dễ bị đua với TomSelect (filter-bar còn là <select multiple> thô, cao
-  // hơn nhiều so với lúc TomSelect đã dựng xong dạng chip gọn), và giá trị
-  // px cứng đó cũng không tự cập nhật khi filter-bar đổi cao (resize/zoom
-  // làm filter-bar xuống 2 dòng) → header bị "kẹt" lệch xuống giữa bảng.
-  // Dùng biến CSS --as-sticky-top do ResizeObserver cập nhật liên tục
-  // (xem script "AS-STICKY-SYNC" phía dưới) để offset luôn đúng bất kể
-  // TomSelect init xong lúc nào hay filter-bar đổi chiều cao lúc nào.
   const thStyle = `background:var(--card);border-bottom:2px solid var(--border);font-weight:700;font-size:11px;cursor:pointer;${NW};padding:8px 6px;position:sticky;top:var(--as-sticky-top,0px);z-index:2`;
-
-  // Narrow col width for CPU/VGA/RAM/SSD
   const NARROW = 'width:72px;min-width:72px;max-width:72px';
+  const PCOL = 'width:118px;min-width:118px';
 
-  let thead = `<colgroup>
-    <col style="width:32px"><!-- # -->
-    <col><!-- Model -->
-    <col style="width:70px;min-width:70px"><!-- Brand -->
-    <col style="width:90px;min-width:90px"><!-- Products Family -->
-    <col style="${NARROW}"><!-- CPU -->
-    <col style="${NARROW}"><!-- VGA -->
-    <col style="${NARROW}"><!-- RAM -->
-    <col style="${NARROW}"><!-- SSD -->
-    ${has3 ? '<col style="width:110px">' : ''}<!-- D-2 -->
-    <col style="width:110px"><!-- D-1 -->
-    <col style="width:110px"><!-- Today -->
-    <col style="width:55px"><!-- Sold -->
-    <col style="width:60px"><!-- Link -->
+  const thead = `<colgroup>
+    <col style="width:32px">
+    <col>
+    <col style="width:70px;min-width:70px">
+    <col style="width:90px;min-width:90px">
+    <col style="${NARROW}"><col style="${NARROW}"><col style="${NARROW}"><col style="${NARROW}">
+    ${AS_DEALERS.map(()=>`<col style="${PCOL}">`).join('')}
   </colgroup>
   <thead><tr>
-    <th style="${C};${thStyle}" onclick="asSortBy('idx')">#</th>
+    <th style="${C};${thStyle}">#</th>
     <th style="${L};${thStyle}" onclick="asSortBy('model')">Model (SKU)${si('model')}</th>
-    <th style="${L};${thStyle};width:70px" onclick="asSortBy('brand')">Brand${si('brand')}</th>
-    <th style="${L};${thStyle};width:90px" onclick="asSortBy('segment')">Products Family${si('segment')}</th>
+    <th style="${L};${thStyle}" onclick="asSortBy('brand')">Brand${si('brand')}</th>
+    <th style="${L};${thStyle}" onclick="asSortBy('segment')">Products Family${si('segment')}</th>
     <th style="${L};${thStyle};${NARROW}" onclick="asSortBy('cpu')">CPU${si('cpu')}</th>
     <th style="${L};${thStyle};${NARROW}" onclick="asSortBy('gpu')">VGA${si('gpu')}</th>
     <th style="${C};${thStyle};${NARROW}" onclick="asSortBy('ram')">RAM${si('ram')}</th>
     <th style="${C};${thStyle};${NARROW}" onclick="asSortBy('ssd')">SSD${si('ssd')}</th>
-    ${has3 ? `<th style="${C};${thStyle}" onclick="asSortBy('prev2')">Price (${prev2Date})${si('prev2')}</th>` : ''}
-    <th style="${C};${thStyle}" onclick="asSortBy('prev')">Price (${prevDate})${si('prev')}</th>
-    <th style="${C};${thStyle};color:var(--accent)" onclick="asSortBy('price')">Price (${todayDate})${si('price')}</th>
-    <th style="${C};${thStyle}" onclick="asSortBy('sold')">Sold${si('sold')}</th>
-    <th style="${L};${thStyle}">Link</th>
+    ${AS_DEALERS.map((d,i)=>`<th style="${C};${thStyle};${i===0?'color:var(--accent)':''}" onclick="asSortBy('p_${d}')">${AS_DEALER_LABEL[d]}${si('p_'+d)}</th>`).join('')}
   </tr></thead>`;
 
-  // ── Price cell helper ────────────────────────────────────────────
-  function priceCell(pNow, pPrev) {
-    if (!pNow) return `<td style="${C}"><span class="td-na">–</span></td>`;
-    const delta = pPrev ? pNow - pPrev : 0;
-    const pct   = pPrev ? ((delta/pPrev)*100).toFixed(1) : null;
-    const isUp  = delta > 0, isDn = delta < 0;
-    const clr   = isDn ? TC('#ef4444') : isUp ? TC('#10b981') : 'inherit';
-    const arrow = isDn ? '▼' : isUp ? '▲' : '';
-    const priceFmt = `<span style="font-weight:700;color:${clr};${NW}">${vnd(pNow)}</span>`;
-    const chgFmt  = pct
-      ? `<br><span style="font-size:10px;color:${clr};${NW}">${arrow} ${Math.abs(pct)}%</span>`
-      : '';
-    return `<td style="${C};vertical-align:top;padding:6px 4px">${priceFmt}${chgFmt}</td>`;
-  }
+  const GREEN = TC('#10b981'), RED = TC('#ef4444');
+  const cellFor = (g, d) => {
+    const x = g.prices[d];
+    if (!x) return `<td style="${C}"></td>`;
+    const multi = g.nDealers > 1;
+    const isMin = x.price === g.min;
+    const clr = !multi ? 'inherit' : isMin ? GREEN : RED;
+    const pr = x.link
+      ? `<a href="${x.link}" target="_blank" style="font-weight:700;color:${clr};text-decoration:none;${NW}">${vnd(x.price)}</a>`
+      : `<span style="font-weight:700;color:${clr};${NW}">${vnd(x.price)}</span>`;
+    let sub = '';
+    if (multi) {
+      if (isMin) sub = `<br><span style="font-size:10px;color:${GREEN};${NW}">▼ thấp nhất</span>`;
+      else {
+        const diff = x.price - g.min, pct = (diff/g.min*100).toFixed(1);
+        sub = `<br><span style="font-size:10px;color:${RED};${NW}">▲ +${pct}% (+${vnd(diff)})</span>`;
+      }
+    }
+    return `<td style="${C};vertical-align:top;padding:6px 4px">${pr}${sub}</td>`;
+  };
 
-  // ── Row builder ─────────────────────────────────────────────────
   const rows = data.length === 0
-    ? `<tr><td colspan="${11 + (has3?1:0)}" class="empty">No matching data.</td></tr>`
-    : data.map((p, i) => {
+    ? `<tr><td colspan="${8 + AS_DEALERS.length}" class="empty">No matching data.</td></tr>`
+    : data.map((g, i) => {
+        const p = g.rep;
         const cpuLabel = p.cpuDetail || p.cpuFamily || '–';
-        const gpuRaw   = p.gpuLabel || p.gpuTag || '';
-        const gpuLabel = gpuRaw && gpuRaw !== 'UMA'
-          ? gpuRaw
-          : (gpuRaw==='UMA' ? 'Integrated' : '–');
-        const ramTxt = normRAM(p.ram);
-        const ssdTxt = normSSD(p.ssd);
-        // Stale rows: shift giá vào đúng cột ngày của nó
-        // latestDate = ngày cuối cùng có data (VD: 17/06/2026)
-        let today, prev, prev2, prev3;
-        if (p.isStale && p.latestDate) {
-          const ld = p.latestDate; // "dd/MM/yyyy"
-          if (ld === prevDate) {
-            // Data ở ngày prev → cột today trống, giá đặt vào prev
-            today = 0;
-            prev  = p.todayPrice || p.kmPrice || 0;
-            prev2 = p.prevPrice  || 0;
-            prev3 = p.prev2Price || 0;
-          } else if (ld === prev2Date) {
-            // Data ở ngày prev2 → 2 cột gần nhất trống
-            today = 0;
-            prev  = 0;
-            prev2 = p.todayPrice || p.kmPrice || 0;
-            prev3 = p.prevPrice  || 0;
-          } else {
-            // FIX 14/08/2026: stale cũ hơn prev2 → tất cả cột giá = 0 (hiện "–").
-            // Trước đây: giá cũ bị đẩy vào cột today → misleading (giá 07/08 hiện dưới header 14/08).
-            today = 0;
-            prev  = 0;
-            prev2 = 0;
-            prev3 = 0;
-          }
-        } else {
-          today = p.todayPrice || p.kmPrice || 0;
-          prev  = p.prevPrice  || 0;
-          prev2 = p.prev2Price || 0;
-          prev3 = p.prev3Price || 0;
-        }
-        const origP  = p.origPrice || 0;
-        const discPct = (origP > 0 && today < origP) ? Math.round((origP - today) / origP * 100) : 0;
-        const rowBg  = i%2===0 ? '' : 'background:rgba(0,0,0,0.018)';
-
-        // today's vs yesterday's overall color for row highlight
-        // Stale rows: use subtle amber background instead
-        const todayDelta = prev ? today - prev : 0;
-        const rowHighlight = p.isStale
-          ? 'background:rgba(251,191,36,0.06)'  // amber tint for stale
-          : todayDelta < 0
-          ? 'background:rgba(239,68,68,0.04)'
-          : todayDelta > 0
-          ? 'background:rgba(16,185,129,0.04)'
-          : rowBg;
-
-        const p2Cell = has3
-          ? (prev2
-            ? priceCell(prev2, prev3)
-            : `<td style="${C}"><span class="td-na">–</span></td>`)
-          : '';
-
-        return `<tr style="${rowHighlight}">
+        const gpuRaw = p.gpuLabel || p.gpuTag || '';
+        const gpuLabel = gpuRaw && gpuRaw !== 'UMA' ? gpuRaw : (gpuRaw==='UMA' ? 'Integrated' : '–');
+        const rowBg = i%2===0 ? '' : 'background:rgba(0,0,0,0.018)';
+        return `<tr style="${rowBg}">
           <td style="${C};padding:5px 4px;color:var(--text2);font-size:11px">${i+1}</td>
           <td style="${L};padding:5px 6px">
             <div class="mname" style="font-size:12px;line-height:1.35;max-width:440px;overflow-wrap:anywhere;word-break:break-word">${p.model}${p.focusModel ? ' <span class="dlr dlr-key" style="font-size:9px;padding:1px 4px">⭐ Key Model</span>' : ''}</div>
-            <span class="dlr ${dlrCls(p.dealer)}" style="font-size:9px;padding:1px 4px">${p.dealer}</span>
-            ${p.isStale ? `<span style="display:inline-block;margin-left:4px;font-size:9px;background:var(--bg-fef3c7);color:var(--fg-92400e);border:1px solid var(--bd-fcd34d);border-radius:3px;padding:1px 4px" title="Không thấy trong lần scrape gần nhất — có thể đã ngừng kinh doanh / hết hàng. Giá hiển thị là giá cũ nhất được ghi nhận.">⚠ No data since ${p.latestDate}</span>` : ''}
-            ${discPct > 0 ? `<span style="font-size:10px;font-style:italic;color:${discPct > 10 ? 'var(--fg-ef4444)' : 'var(--fg-222222)'};margin-left:4px">${discPct}% off SRP</span>` : ''}
           </td>
           <td style="${L};padding:5px 4px;font-size:11px;${NW};color:${brandColor(p.brand)};font-weight:600">${p.brand||'–'}</td>
           <td style="${L};padding:5px 4px;font-size:11px;${NW}">${p.segment||'–'}</td>
           <td style="${L};padding:5px 4px;font-size:11px;line-height:1.3;vertical-align:top;word-break:break-word">${cpuLabel}</td>
           <td style="${L};padding:5px 4px;vertical-align:top">${gpuLabel}</td>
-          <td style="${C};padding:5px 4px;font-size:11px;${NW};vertical-align:top">${ramTxt}</td>
-          <td style="${C};padding:5px 4px;font-size:11px;${NW};vertical-align:top">${ssdTxt}</td>
-          ${p2Cell}
-          ${priceCell(prev,  prev2)}
-          ${priceCell(today, prev)}
-          <td style="${C};padding:5px 4px;font-size:11px;color:var(--fg-6b7280)">${p.sold||'—'}</td>
-          <td style="${L};padding:5px 4px">${p.link?`<a class="lnk" href="${p.link}" target="_blank">View ↗</a>`:'–'}</td>
+          <td style="${C};padding:5px 4px;font-size:11px;${NW};vertical-align:top">${normRAM(p.ram)}</td>
+          <td style="${C};padding:5px 4px;font-size:11px;${NW};vertical-align:top">${normSSD(p.ssd)}</td>
+          ${AS_DEALERS.map(d => cellFor(g, d)).join('')}
         </tr>`;
       }).join('');
-
-  const dateRange = has3
-    ? `${prev2Date} → ${prevDate} → ${todayDate}`
-    : `${prevDate} → ${todayDate}`;
-
-  const staleInView = data.filter(p=>p.isStale).length;
-  const freshCount  = data.length - staleInView;
 
   const container = document.getElementById('allSkusContainer');
   if (!container) return;
   container.innerHTML = `
     <div class="rank-wrap">
       <div class="rank-hdr drop-hdr">
-        <h3>📋 All SKUs — ${data.length} products${staleInView > 0 ? ` <span style="font-size:11px;font-weight:400;color:var(--fg-92400e);background:var(--bg-fef3c7);padding:2px 8px;border-radius:10px;margin-left:6px">⚠ ${staleInView} từ ngày trước</span>` : ''}</h3>
-        <small>All dealers · Price ${dateRange} · % change vs previous day${staleInView > 0 ? ` · <span style="color:var(--fg-92400e)">⚠ = giá ngày gần nhất, chưa có data hôm nay</span>` : ''}</small>
+        <h3>📋 All SKUs — ${data.length} products</h3>
+        <small>So sánh giá hiện tại (${todayDate}) giữa 5 nhà bán · ô trống = nhà đó không bán SKU này · ▲ = đắt hơn nhà rẻ nhất (khi có từ 2 nhà bán)</small>
       </div>
       <div class="tbl-wrap">
         <table id="allSkusTable" style="border-collapse:collapse;font-size:12px;width:100%">
@@ -1537,7 +1452,7 @@ function renderAllSkus() {
 
 function asSortBy(col) {
   if (_asSortCol === col) _asSortDir *= -1;
-  else { _asSortCol = col; _asSortDir = ['price','prev','prev2','ram','ssd'].includes(col) ? 1 : 1; }
+  else { _asSortCol = col; _asSortDir = 1; }
   renderAllSkus();
 }
 
