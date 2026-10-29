@@ -1,17 +1,17 @@
-[2026-10-28T22:49:41.612Z] --- Bắt đầu enrich-and-export.js ---
-[2026-10-28T22:49:41.620Z] Đọc được 2532 SP từ 5 file artifact (scrape-artifacts)
-[2026-10-28T22:49:41.620Z] Đọc Part # (FORMULA render)...
-[2026-10-28T22:49:41.926Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
-[2026-10-28T22:49:41.926Z] Đọc Segment (FORMULA render)...
-[2026-10-28T22:49:42.064Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
-[2026-10-28T22:49:42.064Z] Part# header index: {}
-[2026-10-28T22:49:42.064Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
-[2026-10-28T22:49:42.064Z] Part# map: 0 SKU
-[2026-10-28T22:49:42.064Z] Vendor chuan tu Part#: 0 gia tri -> []
-[2026-10-28T22:49:42.091Z] Tính xong 2532 dòng enriched (loại 0 SP EOL)
-[2026-10-28T22:49:43.258Z] data.csv cũ: 75948 dòng, giữ lại 75948 dòng (loại dòng 29/10/2026 nếu có, sẽ thêm bản mới)
-[2026-10-28T22:49:43.290Z] ✅ Số mã từng dealer đạt ≥70% trung vị 7 ngày
-[2026-10-28T22:49:45.010Z] name_enrich: +thong so tu ten 1197 dong, +tra cheo model code 595 dong, +Part# 2189 dong, +dong may 2848 dong
-[2026-10-28T22:49:45.045Z] ✅ Không có giá bất thường (kiểm tra 2532 dòng vs trung vị 7 ngày)
-[2026-10-28T22:49:45.062Z] Cắt còn 35 ngày gần nhất (76061 dòng)
-[2026-10-28T22:49:45.888Z] ✅ Đã ghi /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 76062 dòng (kể cả header), 26332 KB
+[2026-10-29T22:59:01.022Z] --- Bắt đầu enrich-and-export.js ---
+[2026-10-29T22:59:01.032Z] Đọc được 2574 SP từ 5 file artifact (scrape-artifacts)
+[2026-10-29T22:59:01.033Z] Đọc Part # (FORMULA render)...
+[2026-10-29T22:59:01.455Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
+[2026-10-29T22:59:01.456Z] Đọc Segment (FORMULA render)...
+[2026-10-29T22:59:01.701Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
+[2026-10-29T22:59:01.701Z] Part# header index: {}
+[2026-10-29T22:59:01.701Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
+[2026-10-29T22:59:01.701Z] Part# map: 0 SKU
+[2026-10-29T22:59:01.701Z] Vendor chuan tu Part#: 0 gia tri -> []
+[2026-10-29T22:59:01.740Z] Tính xong 2574 dòng enriched (loại 0 SP EOL)
+[2026-10-29T22:59:03.273Z] data.csv cũ: 76061 dòng, giữ lại 76061 dòng (loại dòng 30/10/2026 nếu có, sẽ thêm bản mới)
+[2026-10-29T22:59:03.316Z] ✅ Số mã từng dealer đạt ≥70% trung vị 7 ngày
+[2026-10-29T22:59:05.420Z] name_enrich: +thong so tu ten 1218 dong, +tra cheo model code 593 dong, +Part# 2189 dong, +dong may 2874 dong
+[2026-10-29T22:59:05.455Z] ✅ Không có giá bất thường (kiểm tra 2574 dòng vs trung vị 7 ngày)
+[2026-10-29T22:59:05.468Z] Cắt còn 35 ngày gần nhất (76247 dòng)
+[2026-10-29T22:59:06.140Z] ✅ Đã ghi /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 76248 dòng (kể cả header), 26395 KB
