@@ -1,17 +1,17 @@
-[2026-11-21T23:30:40.397Z] --- Bắt đầu enrich-and-export.js ---
-[2026-11-21T23:30:40.404Z] Đọc được 2155 SP từ 5 file artifact (scrape-artifacts)
-[2026-11-21T23:30:40.404Z] Đọc Part # (FORMULA render)...
-[2026-11-21T23:30:40.710Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
-[2026-11-21T23:30:40.710Z] Đọc Segment (FORMULA render)...
-[2026-11-21T23:30:40.866Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
-[2026-11-21T23:30:40.866Z] Part# header index: {}
-[2026-11-21T23:30:40.866Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
-[2026-11-21T23:30:40.866Z] Part# map: 0 SKU
-[2026-11-21T23:30:40.866Z] Vendor chuan tu Part#: 0 gia tri -> []
-[2026-11-21T23:30:40.888Z] Tính xong 2155 dòng enriched (loại 0 SP EOL)
-[2026-11-21T23:30:41.998Z] data.csv cũ: 83745 dòng, giữ lại 83745 dòng (loại dòng 22/11/2026 nếu có, sẽ thêm bản mới)
-[2026-11-21T23:30:42.030Z] ⚠ [CellPhone S] chỉ 180 mã (trung vị 7 ngày 560, 32%) — dữ liệu hôm nay KHÔNG đủ, mã thiếu sẽ hiện giá ngày gần nhất
-[2026-11-21T23:30:43.956Z] name_enrich: +thong so tu ten 1033 dong, +tra cheo model code 341 dong, +Part# 1826 dong, +dong may 2508 dong
-[2026-11-21T23:30:43.991Z] ✅ Không có giá bất thường (kiểm tra 2155 dòng vs trung vị 7 ngày)
-[2026-11-21T23:30:44.008Z] Cắt còn 35 ngày gần nhất (83899 dòng)
-[2026-11-21T23:30:44.889Z] ✅ Đã ghi /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 83900 dòng (kể cả header), 29065 KB
+[2026-11-22T23:50:56.186Z] --- Bắt đầu enrich-and-export.js ---
+[2026-11-22T23:50:56.192Z] Đọc được 2134 SP từ 5 file artifact (scrape-artifacts)
+[2026-11-22T23:50:56.193Z] Đọc Part # (FORMULA render)...
+[2026-11-22T23:50:56.463Z] ⚠ Không đọc được tab "Part #" (Unable to parse range: 'Part #'!A1:AE) — bỏ qua, dùng dữ liệu thô lúc scrape thay thế.
+[2026-11-22T23:50:56.463Z] Đọc Segment (FORMULA render)...
+[2026-11-22T23:50:56.613Z] ⚠ Không đọc được tab "Segment" (Unable to parse range: 'Segment'!A1:D) — bỏ qua, Series Group/Segment sẽ để trống.
+[2026-11-22T23:50:56.613Z] Part# header index: {}
+[2026-11-22T23:50:56.613Z] ⚠ Part# thiếu cột bắt buộc (Product Name hoặc Focus Model) — kiểm tra lại header tab.
+[2026-11-22T23:50:56.613Z] Part# map: 0 SKU
+[2026-11-22T23:50:56.613Z] Vendor chuan tu Part#: 0 gia tri -> []
+[2026-11-22T23:50:56.636Z] Tính xong 2134 dòng enriched (loại 0 SP EOL)
+[2026-11-22T23:50:57.767Z] data.csv cũ: 83899 dòng, giữ lại 83899 dòng (loại dòng 23/11/2026 nếu có, sẽ thêm bản mới)
+[2026-11-22T23:50:57.796Z] ⚠ [CellPhone S] chỉ 160 mã (trung vị 7 ngày 560, 29%) — dữ liệu hôm nay KHÔNG đủ, mã thiếu sẽ hiện giá ngày gần nhất
+[2026-11-22T23:50:59.716Z] name_enrich: +thong so tu ten 1012 dong, +tra cheo model code 323 dong, +Part# 1804 dong, +dong may 2487 dong
+[2026-11-22T23:50:59.752Z] ✅ Không có giá bất thường (kiểm tra 2134 dòng vs trung vị 7 ngày)
+[2026-11-22T23:50:59.765Z] Cắt còn 35 ngày gần nhất (84039 dòng)
+[2026-11-22T23:51:00.645Z] ✅ Đã ghi /home/runner/work/laptop-price-monitor/laptop-price-monitor/dashboard/data.csv — 84040 dòng (kể cả header), 29126 KB
